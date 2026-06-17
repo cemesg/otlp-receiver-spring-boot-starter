@@ -1,0 +1,18 @@
+# JMH benchmark runner. Build context is the parent (beyla/) dir.
+# Step 1: build+install the reactor so the starter jar is in the local repo.
+# Step 2: build the bench, which depends on that jar (no source copying).
+FROM maven:3.9-eclipse-temurin-21 AS build
+WORKDIR /src
+
+COPY pom.xml .
+COPY otlp-receiver-spring-boot-starter/ otlp-receiver-spring-boot-starter/
+COPY demo-app/ demo-app/
+RUN mvn -B -q install -DskipTests
+
+COPY bench/ bench/
+RUN mvn -B -q -f bench/pom.xml package
+
+FROM eclipse-temurin:21-jre
+WORKDIR /b
+COPY --from=build /src/bench/target/benchmarks.jar benchmarks.jar
+ENTRYPOINT ["java", "-jar", "benchmarks.jar"]

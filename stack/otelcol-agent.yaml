@@ -1,0 +1,60 @@
+# Agent-tier Collector: runs "close to the workload".
+# Receives OTLP from Beyla, also scrapes system metrics itself, and forwards
+# everything UP to the gateway tier. This is the fan-in point on the node.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Safety net + "system metrics": guarantees data flows end-to-end through the
+  # whole pipeline even if eBPF is constrained on the Docker Desktop VM kernel.
+  hostmetrics:
+    collection_interval: 10s
+    scrapers:
+      cpu:
+      memory:
+      load:
+      network:
+      filesystem:
+
+processors:
+  batch:
+    timeout: 2s
+  resourcedetection:
+    detectors: [env, system]
+    override: false
+
+exporters:
+  # Forward to the gateway tier (the central "control plane").
+  otlp/gateway:
+    endpoint: otelcol-gateway:4317
+    tls:
+      insecure: true
+  # Tap for the UI: a sample of exactly what Beyla emits (OTLP the agent
+  # receives), written as one JSON payload per line for the dashboard to read.
+  file/beyla:
+    path: /taps/beyla.json
+    rotation:
+      max_megabytes: 1
+      max_backups: 1
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    # Beyla's eBPF metrics — kept separate so the tap shows ONLY Beyla output.
+    metrics/app:
+      receivers: [otlp]
+      processors: [resourcedetection, batch]
+      exporters: [file/beyla, otlp/gateway, debug]
+    # System metrics scraped locally.
+    metrics/host:
+      receivers: [hostmetrics]
+      processors: [resourcedetection, batch]
+      exporters: [otlp/gateway]
+  telemetry:
+    logs:
+      level: info

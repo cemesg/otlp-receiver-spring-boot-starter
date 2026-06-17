@@ -1,0 +1,89 @@
+# Full Beyla → agent → gateway → Java-receiver pipeline, simulating a prod
+# observability stack on one Docker network.
+#
+#   sampleapp  : a plain HTTP server (the "instrumented service")
+#   loadgen    : hammers sampleapp so there is traffic for Beyla to observe
+#   beyla      : eBPF auto-instrumentation; emits OTLP HTTP metrics for sampleapp
+#   otelcol-agent   : node-tier Collector (OTLP in + hostmetrics) -> forwards up
+#   otelcol-gateway : central-tier Collector -> exports to the Java backend
+#   java-receiver   : the Spring Boot OTLP receiver (normalizes -> SSE/snapshot)
+
+services:
+  sampleapp:
+    image: python:3.12-alpine
+    command: ["python", "-m", "http.server", "8080"]
+    ports:
+      - "8080:8080"        # browse http://localhost:8080 to generate traffic yourself
+    networks: [obs]
+
+  loadgen:
+    image: curlimages/curl:latest
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "loadgen: warming up..."; sleep 5;
+        while true; do
+          curl -s -o /dev/null http://sampleapp:8080/ ;
+          curl -s -o /dev/null http://sampleapp:8080/nonexistent ;
+          sleep 0.3 ;
+        done
+    depends_on: [sampleapp]
+    networks: [obs]
+
+  beyla:
+    image: grafana/beyla:latest
+    # eBPF needs kernel access; share the target's PID namespace so Beyla can
+    # find the sampleapp process. Network namespace is left alone so Beyla can
+    # still resolve otelcol-agent over the compose network.
+    privileged: true
+    pid: "service:sampleapp"
+    environment:
+      BEYLA_OPEN_PORT: "8080"
+      OTEL_SERVICE_NAME: "sampleapp"
+      # Simulated emitting-service/node identity. In OpenShift these are injected
+      # automatically (k8sattributes processor / downward API); here we set them
+      # by hand so the receiver's `source` block looks like a real deployment.
+      OTEL_RESOURCE_ATTRIBUTES: "service.namespace=storefront,service.version=1.4.2,k8s.cluster.name=ocp-prod,k8s.namespace.name=storefront,k8s.deployment.name=sampleapp,k8s.pod.name=sampleapp-7d9f9c-abcde,k8s.node.name=worker-node-01,deployment.environment=production"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otelcol-agent:4318"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_METRIC_EXPORT_INTERVAL: "5000"   # ms — fast feedback for the demo
+      BEYLA_LOG_LEVEL: "info"
+    depends_on: [sampleapp, otelcol-agent]
+    networks: [obs]
+
+  otelcol-agent:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otelcol/config.yaml"]
+    user: "0:0"             # write tap files to the shared root-owned volume
+    volumes:
+      - ./otelcol-agent.yaml:/etc/otelcol/config.yaml:ro
+      - taps:/taps          # writes /taps/beyla.json for the UI tap
+    depends_on: [otelcol-gateway]
+    networks: [obs]
+
+  otelcol-gateway:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otelcol/config.yaml"]
+    user: "0:0"             # write tap files to the shared root-owned volume
+    volumes:
+      - ./otelcol-gateway.yaml:/etc/otelcol/config.yaml:ro
+      - taps:/taps          # writes /taps/gateway.json for the UI tap
+    depends_on: [java-receiver]
+    networks: [obs]
+
+  java-receiver:
+    build:
+      context: ..
+      dockerfile: stack/Dockerfile.receiver
+    ports:
+      - "4318:4318"        # OTLP ingest + dashboard + /api/metrics/{recent,stream}
+    volumes:
+      - taps:/taps:ro       # reads the collector taps to serve the dashboard
+    networks: [obs]
+
+volumes:
+  taps:
+
+networks:
+  obs:
+    driver: bridge

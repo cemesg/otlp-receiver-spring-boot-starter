@@ -1,0 +1,25 @@
+server:
+  port: 4318   # OTLP/HTTP default port
+
+spring:
+  threads:
+    virtual:
+      enabled: true   # Java 21 virtual threads: cheap concurrency for the I/O-bound write path
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false   # emit timestamps as ISO-8601 strings, not epoch
+
+# Reusable receiver config (io.github.cemesg.otlp.receiver). All filtering is glob-based
+# and applied during the normalize pass, so trimming is quick and minimal.
+otlp:
+  receiver:
+    path: /v1/metrics
+    drop-empty-values: true            # drop "" / null attribute & source entries (e.g. empty service.namespace)
+    source:
+      exclude: ["telemetry.distro.*"]  # demo: drop these identity keys from every point
+    # Other knobs (uncomment to use):
+    # types: [sum, gauge, histogram]   # keep only these metric types (empty = all)
+    # metrics:
+    #   exclude: ["system.network.*"]  # drop noisy metric names
+    # attributes:
+    #   exclude: ["server.address", "server.port"]

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Beyla → OTel pipeline — live taps</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: #0d1117; color: #c9d1d9;
+  }
+  header { padding: 14px 18px; border-bottom: 1px solid #21262d; }
+  header h1 { margin: 0 0 6px; font-size: 15px; color: #e6edf3; }
+  .flow { color: #8b949e; font-size: 12px; }
+  .flow b { color: #58a6ff; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: #21262d; }
+  .panel { background: #0d1117; display: flex; flex-direction: column; min-height: 0;
+           height: calc(100vh - 64px); }
+  .phead { padding: 10px 14px; border-bottom: 1px solid #21262d; }
+  .phead h2 { margin: 0; font-size: 13px; color: #e6edf3; }
+  .phead .sub { color: #8b949e; font-size: 11px; margin-top: 2px; }
+  .stat { color: #3fb950; font-size: 11px; margin-top: 4px; min-height: 14px; }
+  .body { overflow: auto; padding: 10px 14px; flex: 1; }
+  pre { margin: 0 0 10px; white-space: pre-wrap; word-break: break-word; }
+  .card { border: 1px solid #21262d; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px;
+          background: #0b0f14; }
+  .k { color: #79c0ff; } .s { color: #a5d6ff; } .n { color: #d2a8ff; } .b { color: #ffa657; }
+  .tag { display: inline-block; background: #1f6feb33; color: #58a6ff; border-radius: 4px;
+         padding: 1px 6px; font-size: 11px; margin: 0 4px 4px 0; }
+  .name { color: #e6edf3; font-weight: 600; }
+  .dim { color: #8b949e; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Beyla → OpenTelemetry pipeline — live sampled taps</h1>
+  <div class="flow">
+    loadgen → sampleapp → <b>Beyla (eBPF)</b> → otelcol-agent →
+    <b>otelcol-gateway</b> → <b>java-receiver</b>
+  </div>
+</header>
+
+<div class="grid">
+  <section class="panel">
+    <div class="phead">
+      <h2>① Beyla eBPF output</h2>
+      <div class="sub">raw OTLP the agent receives from Beyla</div>
+      <div class="stat" id="stat-beyla">connecting…</div>
+    </div>
+    <div class="body"><pre id="beyla" class="dim">waiting for first payload…</pre></div>
+  </section>
+
+  <section class="panel">
+    <div class="phead">
+      <h2>② Gateway → backend output</h2>
+      <div class="sub">raw OTLP the gateway exports to the receiver</div>
+      <div class="stat" id="stat-gateway">connecting…</div>
+    </div>
+    <div class="body"><pre id="gateway" class="dim">waiting for first payload…</pre></div>
+  </section>
+
+  <section class="panel">
+    <div class="phead">
+      <h2>③ Receiver normalized output</h2>
+      <div class="sub">clean per-point JSON, live via SSE (newest first)</div>
+      <div class="stat" id="stat-recv">connecting…</div>
+    </div>
+    <div class="body" id="recv"></div>
+  </section>
+</div>
+
+<script>
+// ---- helpers --------------------------------------------------------------
+function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+// Syntax-highlight a JSON string.
+function hl(json){
+  return esc(json).replace(
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(\.\d+)?([eE][+\-]?\d+)?)/g,
+    m => {
+      let cls = 'n';
+      if (/^"/.test(m)) cls = /:$/.test(m) ? 'k' : 's';
+      else if (/true|false|null/.test(m)) cls = 'b';
+      return '<span class="'+cls+'">'+m+'</span>';
+    });
+}
+
+// Count metrics / data points in an OTLP ExportMetricsServiceRequest.
+function otlpSummary(o){
+  let metrics = 0, points = 0, names = new Set();
+  (o.resourceMetrics||[]).forEach(rm =>
+    (rm.scopeMetrics||[]).forEach(sm =>
+      (sm.metrics||[]).forEach(m => {
+        metrics++; names.add(m.name);
+        const d = m.gauge||m.sum||m.histogram||m.exponentialHistogram||m.summary||{};
+        points += (d.dataPoints||[]).length;
+      })));
+  return { metrics, points, names: [...names] };
+}
+
+// ---- taps (poll) ----------------------------------------------------------
+async function pollTap(stage, preId, statId){
+  try {
+    const r = await fetch('/api/tap/'+stage, {cache:'no-store'});
+    const txt = await r.text();
+    let o;
+    try { o = JSON.parse(txt); } catch { return; }
+    const pre = document.getElementById(preId);
+    const stat = document.getElementById(statId);
+    if (o.status){ stat.textContent = o.status; return; }
+    const s = otlpSummary(o);
+    stat.textContent = `${s.metrics} metrics · ${s.points} data points · ${new Date().toLocaleTimeString()}`;
+    pre.className = '';
+    let body = JSON.stringify(o, null, 2);
+    if (body.length > 8000) body = body.slice(0, 8000) + '\n… (truncated)';
+    pre.innerHTML = (s.names.length ? '<div class="dim">'+s.names.map(n=>'<span class="tag">'+esc(n)+'</span>').join('')+'</div>\n' : '') + hl(body);
+  } catch(e){ /* transient; next tick retries */ }
+}
+function loopTap(stage, preId, statId){
+  pollTap(stage, preId, statId);
+  setInterval(() => pollTap(stage, preId, statId), 2000);
+}
+loopTap('beyla', 'beyla', 'stat-beyla');
+loopTap('gateway', 'gateway', 'stat-gateway');
+
+// ---- receiver (SSE) -------------------------------------------------------
+const recv = document.getElementById('recv');
+const statRecv = document.getElementById('stat-recv');
+let received = 0;
+const MAX_CARDS = 40;
+const es = new EventSource('/api/metrics/stream');
+es.onopen = () => statRecv.textContent = 'streaming…';
+es.onerror = () => statRecv.textContent = 'stream reconnecting…';
+es.onmessage = (ev) => {
+  let p; try { p = JSON.parse(ev.data); } catch { return; }
+  received++;
+  statRecv.textContent = `${received} points · ${new Date().toLocaleTimeString()}`;
+  const a = p.attributes || {};
+  const s = p.source || {};
+  // "who emitted this" — service identity + k8s/host topology
+  const svc = s['service.namespace'] ? esc(s['service.namespace'])+'/'+esc(s['service.name']||'?')
+                                      : esc(s['service.name']||'unknown');
+  const node = s['k8s.pod.name'] || s['k8s.node.name'] || s['host.name'] || s['container.id'];
+  const idTags =
+    '<span class="tag">svc:'+svc+'</span>'+
+    (s['k8s.namespace.name'] ? '<span class="tag">ns:'+esc(s['k8s.namespace.name'])+'</span>' : '')+
+    (s['k8s.deployment.name'] ? '<span class="tag">deploy:'+esc(s['k8s.deployment.name'])+'</span>' : '')+
+    (node ? '<span class="tag">@'+esc(node)+'</span>' : '')+
+    (s['telemetry.sdk.name'] ? '<span class="tag">'+esc(s['telemetry.sdk.name'])+'</span>' : '');
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML =
+    '<span class="name">'+esc(p.name)+'</span> '+
+    '<span class="dim">'+esc(p.type)+(p.unit?(' · '+esc(p.unit)):'')+'</span><br>'+
+    '<div style="margin:4px 0">'+idTags+'</div>'+
+    (a['http.route'] ? '<span class="tag">'+esc(a['http.request.method']||'')+' '+esc(a['http.route'])+'</span>' : '')+
+    (a['http.response.status_code'] ? '<span class="tag">'+esc(a['http.response.status_code'])+'</span>' : '')+
+    (s['pipeline.gateway'] ? '<span class="tag">via gateway</span>' : '')+
+    '<pre style="margin-top:6px">'+hl(JSON.stringify(p.value))+'</pre>';
+  recv.insertBefore(card, recv.firstChild);
+  while (recv.childElementCount > MAX_CARDS) recv.removeChild(recv.lastChild);
+};
+</script>
+</body>
+</html>

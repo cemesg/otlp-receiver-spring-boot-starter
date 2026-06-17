@@ -1,0 +1,45 @@
+# Gateway-tier Collector: the central aggregation / control point.
+# All agents send here; the gateway applies org-wide policy (tagging, batching)
+# and exports to the backend — your Spring Boot OTLP receiver.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 2s
+  # Stamp every point so you can see it traversed the gateway in the final JSON.
+  resource:
+    attributes:
+      - key: pipeline.gateway
+        value: "otelcol-gateway"
+        action: upsert
+
+exporters:
+  # Export to the Java receiver. otlphttp appends /v1/metrics to the endpoint,
+  # which is exactly the path MetricsController handles. Default encoding is
+  # protobuf, which the controller parses.
+  otlphttp/java:
+    endpoint: http://java-receiver:4318
+  # Tap for the UI: a sample of exactly what the gateway exports to the backend.
+  file/gateway:
+    path: /taps/gateway.json
+    rotation:
+      max_megabytes: 1
+      max_backups: 1
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [resource, batch]
+      exporters: [otlphttp/java, file/gateway, debug]
+  telemetry:
+    logs:
+      level: info
