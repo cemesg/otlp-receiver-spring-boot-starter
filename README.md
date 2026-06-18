@@ -67,11 +67,44 @@ trimming what you don't need is cheap:
 | Property | Effect |
 |---|---|
 | `path` | Ingest path (default `/v1/metrics`). |
+| `mode` | `normalize` (default) or `raw` — see [Raw mode](#raw-mode-store-now-process-later). |
 | `types` | Keep only these metric types (empty = all). |
 | `drop-empty-values` | Drop attribute/source entries with `""`/null values. |
 | `metrics.include` / `metrics.exclude` | Filter by metric name. |
 | `source.include` / `source.exclude` | Filter resource/identity keys (e.g. `k8s.*`). |
 | `attributes.include` / `attributes.exclude` | Filter data-point dimension keys. |
+
+## Raw mode (store now, process later)
+
+By default the receiver decodes + normalizes on ingest. If instead you want to
+**store the OTLP body verbatim and process it elsewhere/later** (e.g. tee to
+Kafka or object storage), set:
+
+```yaml
+otlp:
+  receiver:
+    mode: raw
+```
+
+Then the same ingest path skips all decoding — it hands the raw request bytes to
+a `RawMetricConsumer` and returns the OTLP ack — and exposes them on
+`GET /api/raw/recent`. The default `InMemoryRawMetricConsumer` is a dev sink;
+for production define your own bean to write the bytes somewhere durable:
+
+```java
+@Bean
+RawMetricConsumer rawMetricConsumer(MyKafkaWriter writer) {
+    return payload -> writer.send(payload.body());   // store the exact OTLP bytes
+}
+```
+
+It's a self-contained `…receiver.raw` package (consumer SPI, in-memory impl,
+ingest + read controllers) — copy it out if you only want this mode.
+
+**When raw wins:** you're a durable buffer feeding a real downstream pipeline.
+**When it doesn't:** if you want query-ready data directly, normalize-on-ingest
+(the cost is ~0.18 µs/point — negligible vs I/O). Storing raw doesn't avoid the
+work, it defers it; store **protobuf** (not JSON) bytes to keep storage small.
 
 ## Performance & scaling
 

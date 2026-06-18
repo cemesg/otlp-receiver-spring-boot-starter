@@ -31,6 +31,18 @@ public class OtlpReceiverProperties {
     /** HTTP path the OTLP/HTTP ingest endpoint is mounted at. */
     private String path = "/v1/metrics";
 
+    /**
+     * Ingest mode:
+     * <ul>
+     *   <li>{@code normalize} (default) — decode OTLP and emit flat per-point JSON
+     *       on {@code /api/metrics/*}.</li>
+     *   <li>{@code raw} — store the OTLP request body verbatim (no decode, no
+     *       normalize) and expose it on {@code /api/raw/*} for later processing.
+     *       Faster ingest; defers the work. See the {@code raw} package.</li>
+     * </ul>
+     */
+    private String mode = "normalize";
+
     /** Metric types to keep ({@code gauge,sum,histogram,exponential_histogram,summary}). Empty = keep all. */
     private List<String> types = new ArrayList<>();
 
@@ -62,6 +74,8 @@ public class OtlpReceiverProperties {
 
     public String getPath() { return path; }
     public void setPath(String path) { this.path = path; }
+    public String getMode() { return mode; }
+    public void setMode(String mode) { this.mode = mode; }
     public List<String> getTypes() { return types; }
     public void setTypes(List<String> types) { this.types = types; }
     public boolean isDropEmptyValues() { return dropEmptyValues; }

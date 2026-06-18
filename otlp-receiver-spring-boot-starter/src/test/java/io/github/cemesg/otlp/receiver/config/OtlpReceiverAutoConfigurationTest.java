@@ -5,6 +5,9 @@ import io.github.cemesg.otlp.receiver.consumer.MetricConsumer;
 import io.github.cemesg.otlp.receiver.filter.MetricFilter;
 import io.github.cemesg.otlp.receiver.model.MetricPoint;
 import io.github.cemesg.otlp.receiver.normalize.MetricNormalizer;
+import io.github.cemesg.otlp.receiver.raw.InMemoryRawMetricConsumer;
+import io.github.cemesg.otlp.receiver.raw.RawMetricsController;
+import io.github.cemesg.otlp.receiver.raw.RawOtlpController;
 import io.github.cemesg.otlp.receiver.web.MetricsViewController;
 import io.github.cemesg.otlp.receiver.web.OtlpMetricsController;
 import org.junit.jupiter.api.Test;
@@ -31,6 +34,20 @@ class OtlpReceiverAutoConfigurationTest {
                 .hasSingleBean(InMemoryMetricConsumer.class)
                 .hasSingleBean(OtlpMetricsController.class)
                 .hasSingleBean(MetricsViewController.class));
+    }
+
+    @Test
+    void rawModeWiresRawStackAndDisablesNormalizeStack() {
+        runner.withPropertyValues("otlp.receiver.mode=raw").run(ctx -> {
+            assertThat(ctx)
+                    .hasSingleBean(InMemoryRawMetricConsumer.class)
+                    .hasSingleBean(RawOtlpController.class)
+                    .hasSingleBean(RawMetricsController.class);
+            // normalize stack is off in raw mode
+            assertThat(ctx).doesNotHaveBean(MetricNormalizer.class);
+            assertThat(ctx).doesNotHaveBean(OtlpMetricsController.class);
+            assertThat(ctx).doesNotHaveBean(InMemoryMetricConsumer.class);
+        });
     }
 
     @Test

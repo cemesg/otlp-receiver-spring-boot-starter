@@ -1,0 +1,81 @@
+{
+  "name": "http.server.request.duration",
+  "description": null,
+  "unit": "s",
+  "type": "histogram",
+  "timestamp": "2026-06-18T05:53:23.814724925Z",
+  "startTimestamp": "2026-06-17T16:58:37.060546292Z",
+  "scope": {
+    "name": "go.opentelemetry.io/obi"
+  },
+  "source": {
+    "service.name": "sampleapp",
+    "service.namespace": "storefront",
+    "service.instance.id": "179d070c2ec2:1127",
+    "service.version": "1.4.2",
+    "k8s.cluster.name": "ocp-prod",
+    "k8s.namespace.name": "storefront",
+    "k8s.deployment.name": "sampleapp",
+    "k8s.pod.name": "sampleapp-7d9f9c-abcde",
+    "k8s.node.name": "worker-node-01",
+    "host.name": "179d070c2ec2",
+    "telemetry.sdk.name": "beyla",
+    "telemetry.sdk.language": "python",
+    "telemetry.sdk.version": "v1.43.0",
+    "os.type": "linux",
+    "deployment.environment": "production",
+    "pipeline.gateway": "otelcol-gateway"
+  },
+  "attributes": {
+    "http.request.method": "GET",
+    "http.response.status_code": 404,
+    "http.route": "/nonexistent",
+    "server.address": "sampleapp",
+    "server.port": 8080,
+    "service.name": "sampleapp",
+    "url.scheme": "http"
+  },
+  "value": {
+    "count": 38673,
+    "sum": 25.73956040199982,
+    "min": 0.000207292,
+    "max": 0.003595792,
+    "bounds": [
+      0.0,
+      0.005,
+      0.01,
+      0.025,
+      0.05,
+      0.075,
+      0.1,
+      0.25,
+      0.5,
+      0.75,
+      1.0,
+      2.5,
+      5.0,
+      7.5,
+      10.0
+    ],
+    "buckets": [
+      0,
+      38673,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "temporality": "cumulative",
+    "average": 0.0006655692706022243
+  }
+}
